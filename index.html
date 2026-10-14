@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Arcade IndexedDB</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);--bg:#f6f5f1;--card:#fff;--tx:#1d1d1b;--mu:#6b6a64;--ac:#3b5bdb;--bd:#e2e0d8}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#17181c;--card:#22242a;--tx:#eceae4;--mu:#9a9890;--ac:#7c93ff;--bd:#33353d}}
+:root[data-theme="dark"]{--bg:#17181c;--card:#22242a;--tx:#eceae4;--mu:#9a9890;--ac:#7c93ff;--bd:#33353d}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.4}
+main{max-width:560px;margin:0 auto;padding:16px}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:16px;margin:0 0 8px}
+.mu{color:var(--mu);font-size:13px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:14px;margin:12px 0}
+button,input{font:inherit}
+button{background:var(--ac);color:#fff;border:0;border-radius:10px;padding:10px 14px;cursor:pointer}
+button.g{background:transparent;color:var(--tx);border:1px solid var(--bd)}
+input{padding:10px;border-radius:10px;border:1px solid var(--bd);background:var(--bg);color:var(--tx);width:100%}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.tabs button{flex:1}
+.grid{display:grid;gap:8px}
+.mem{grid-template-columns:repeat(4,1fr)}
+.mem button{aspect-ratio:1;font-size:28px;background:var(--bg);color:var(--tx);border:1px solid var(--bd);padding:0}
+.mem button.on{background:var(--card)}.mem button.ok{opacity:.45}
+.ttt{grid-template-columns:repeat(3,1fr)}
+.ttt button{aspect-ratio:1;font-size:36px;background:var(--bg);color:var(--tx);border:1px solid var(--bd);padding:0}
+table{width:100%;border-collapse:collapse;font-size:14px}td,th{text-align:left;padding:6px 4px;border-bottom:1px solid var(--bd)}
+.wrap{overflow-x:auto}
+</style></head><body><main>
+<h1>🎮 Arcade IndexedDB</h1>
+<div class="mu">Scores et profil enregistrés localement dans IndexedDB.</div>
+
+<div class="card" id="login">
+ <h2>Joueur</h2>
+ <div class="row"><input id="name" placeholder="Votre pseudo" maxlength="20" style="flex:1"><button onclick="setPlayer()">OK</button></div>
+</div>
+
+<div id="app" hidden>
+ <div class="row tabs">
+  <button onclick="show('memory')">Memory</button>
+  <button onclick="show('ttt')">Morpion</button>
+  <button onclick="show('num')">Nombre</button>
+  <button class="g" onclick="show('scores')">Scores</button>
+ </div>
+ <div class="card" id="view"></div>
+ <div class="mu">Joueur : <b id="who"></b> · <a href="#" onclick="logout();return false" style="color:var(--ac)">changer</a></div>
+</div>
+
+<script>
+let db=null,mem={},player=null;
+function open(){return new Promise((res)=>{
+ try{
+  const r=indexedDB.open('arcade',1);
+  r.onupgradeneeded=()=>{const d=r.result;
+   d.createObjectStore('players',{keyPath:'name'});
+   const s=d.createObjectStore('scores',{keyPath:'id',autoIncrement:true});
+   s.createIndex('game','game');};
+  r.onsuccess=()=>{db=r.result;res()};
+  r.onerror=()=>res();
+ }catch(e){res()}
+})}
+function tx(store,mode,fn){return new Promise((res)=>{
+ if(!db){res(fn===null?null:mem[store]||[]);return}
+ try{const t=db.transaction(store,mode),s=t.objectStore(store);const q=fn(s);
+  t.oncomplete=()=>res(q&&q.result);t.onerror=()=>res(null);}catch(e){res(null)}
+})}
+const addScore=(game,value,label)=>{
+ const rec={game,value,label,name:player,date:Date.now()};
+ if(!db){(mem.scores=mem.scores||[]).push(rec);return Promise.resolve()}
+ return tx('scores','readwrite',s=>s.add(rec));
+};
+const allScores=()=>db?tx('scores','readonly',s=>s.getAll()):Promise.resolve(mem.scores||[]);
+const $=id=>document.getElementById(id),v=()=>$('view');
+
+async function setPlayer(){
+ const n=$('name').value.trim();if(!n)return;
+ player=n;
+ if(db)await tx('players','readwrite',s=>s.put({name:n,last:Date.now()}));
+ try{localStorage.setItem('arcade_player',n)}catch(e){}
+ $('login').hidden=true;$('app').hidden=false;$('who').textContent=n;show('memory');
+}
+function logout(){player=null;$('app').hidden=true;$('login').hidden=false}
+
+function show(g){({memory,ttt,num,scores})[g]()}
+
+/* Memory */
+function memory(){
+ const em=['🍎','🚀','🐱','🎲','🌵','🎸','🍕','⚽'];
+ let cards=[...em,...em].sort(()=>Math.random()-.5),open=[],found=0,moves=0,lock=false;
+ v().innerHTML='<h2>Memory</h2><div class="mu" id="mm">Coups : 0</div><div class="grid mem" id="g"></div>';
+ const g=$('g');
+ cards.forEach((c,i)=>{const b=document.createElement('button');b.textContent='?';
+  b.onclick=()=>{
+   if(lock||b.classList.contains('on')||b.classList.contains('ok'))return;
+   b.textContent=c;b.classList.add('on');open.push([b,c]);
+   if(open.length==2){moves++;$('mm').textContent='Coups : '+moves;
+    const [a,d]=open;
+    if(a[1]==d[1]){a[0].className=d[0].className='ok';found++;open=[];
+     if(found==8){addScore('memory',moves,moves+' coups');$('mm').textContent='Bravo ! '+moves+' coups 🎉';}}
+    else{lock=true;setTimeout(()=>{open.forEach(x=>{x[0].textContent='?';x[0].classList.remove('on')});open=[];lock=false},700)}}
+  };g.appendChild(b)});
+ v().insertAdjacentHTML('beforeend','<p><button class="g" onclick="memory()">Rejouer</button></p>');
+}
+
+/* Morpion */
+function ttt(){
+ let b=Array(9).fill(''),over=false;
+ const L=[[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+ const win=p=>L.some(l=>l.every(i=>b[i]==p));
+ v().innerHTML='<h2>Morpion (vous : ✕)</h2><div class="mu" id="tm">À vous</div><div class="grid ttt" id="g"></div><p><button class="g" onclick="ttt()">Rejouer</button></p>';
+ const draw=()=>{$('g').innerHTML='';b.forEach((c,i)=>{const x=document.createElement('button');x.textContent=c;x.onclick=()=>play(i);$('g').appendChild(x)})};
+ const end=(r)=>{over=true;$('tm').textContent={W:'Vous gagnez 🎉',L:'L’ordinateur gagne',D:'Match nul'}[r];addScore('ttt',r=='W'?1:0,{W:'Victoire',L:'Défaite',D:'Nul'}[r])};
+ function play(i){
+  if(over||b[i])return;b[i]='✕';draw();
+  if(win('✕'))return end('W');
+  if(!b.includes(''))return end('D');
+  const free=b.map((c,k)=>c?-1:k).filter(k=>k>=0);
+  const tryWin=p=>free.find(k=>{b[k]=p;const w=win(p);b[k]='';return w});
+  let m=tryWin('◯');if(m===undefined)m=tryWin('✕');
+  if(m===undefined)m=b[4]?free[Math.floor(Math.random()*free.length)]:4;
+  b[m]='◯';draw();
+  if(win('◯'))return end('L');
+  if(!b.includes(''))end('D');
+ }
+ draw();
+}
+
+/* Devine le nombre */
+function num(){
+ const n=1+Math.floor(Math.random()*100);let t=0,done=false;
+ v().innerHTML='<h2>Devine le nombre (1–100)</h2><div class="row"><input id="gv" type="number" inputmode="numeric" style="flex:1"><button id="gb">Tester</button></div><p id="gm" class="mu">Moins d’essais = meilleur score.</p><button class="g" onclick="num()">Rejouer</button>';
+ $('gb').onclick=()=>{
+  if(done)return;const x=+$('gv').value;if(!x)return;t++;
+  if(x==n){done=true;$('gm').textContent='Trouvé en '+t+' essais 🎉';addScore('num',t,t+' essais')}
+  else $('gm').textContent=(x<n?'Plus grand':'Plus petit')+' — essai '+t;
+  $('gv').value='';
+ };
+}
+
+/* Scores */
+async function scores(){
+ const all=(await allScores())||[];
+ const best=(g,asc)=>{const l=all.filter(s=>s.game==g).sort((a,b)=>asc?a.value-b.value:b.value-a.value).slice(0,5);
+  return l.length?l.map((s,i)=>`<tr><td>${i+1}</td><td>${esc(s.name)}</td><td>${esc(s.label)}</td></tr>`).join(''):'<tr><td class="mu">Aucun score</td></tr>'};
+ const wins=all.filter(s=>s.game=='ttt'&&s.value==1&&s.name==player).length;
+ v().innerHTML=`<h2>Meilleurs scores</h2><div class="wrap">
+ <b>Memory</b><table>${best('memory',true)}</table><br>
+ <b>Nombre</b><table>${best('num',true)}</table></div>
+ <p class="mu">Victoires au morpion (vous) : ${wins}</p>
+ <button class="g" onclick="clearAll()">Effacer les scores</button>`;
+}
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+async function clearAll(){if(!confirm('Effacer tous les scores ?'))return;
+ if(db)await tx('scores','readwrite',s=>s.clear());else mem.scores=[];scores()}
+
+open().then(()=>{try{const p=localStorage.getItem('arcade_player');if(p){$('name').value=p}}catch(e){}});
+</script></main></body></html>
