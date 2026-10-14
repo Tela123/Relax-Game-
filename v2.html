@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Jeux de société et de réflexion</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);--bg:#f6f5f1;--card:#fff;--tx:#1d1d1b;--mu:#6b6a64;--ac:#3b5bdb;--bd:#e2e0d8;--r:#e03131;--y:#f2b705}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#17181c;--card:#22242a;--tx:#eceae4;--mu:#9a9890;--ac:#7c93ff;--bd:#33353d}}
+:root[data-theme="dark"]{--bg:#17181c;--card:#22242a;--tx:#eceae4;--mu:#9a9890;--ac:#7c93ff;--bd:#33353d}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.4}
+main{max-width:520px;margin:0 auto;padding:16px}
+h1{font-size:21px;margin:0 0 4px}h2{font-size:16px;margin:0 0 8px}
+.mu{color:var(--mu);font-size:13px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:14px;margin:12px 0}
+button,input{font:inherit}
+button{background:var(--ac);color:#fff;border:0;border-radius:10px;padding:9px 12px;cursor:pointer}
+button.g{background:transparent;color:var(--tx);border:1px solid var(--bd)}
+input{padding:10px;border-radius:10px;border:1px solid var(--bd);background:var(--bg);color:var(--tx);width:100%}
+.row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.menu button{flex:1 1 30%}
+.grid{display:grid;gap:5px}
+.cell{aspect-ratio:1;background:var(--bg);color:var(--tx);border:1px solid var(--bd);padding:0;font-size:26px;border-radius:8px}
+.c4{grid-template-columns:repeat(7,1fr);background:#2b4acb;padding:6px;border-radius:12px}
+.c4 .cell{border-radius:50%;border:0;background:var(--bg)}
+.c4 .p1{background:var(--r)}.c4 .p2{background:var(--y)}
+.t3{grid-template-columns:repeat(3,1fr)}
+.g48{grid-template-columns:repeat(4,1fr);touch-action:none}
+.g48 .cell{font-size:22px;font-weight:700;display:flex;align-items:center;justify-content:center}
+.sd{grid-template-columns:repeat(9,1fr);gap:2px}
+.sd .cell{font-size:16px;border-radius:3px;border-color:var(--mu)}
+.sd .fx{font-weight:700;background:var(--bd)}.sd .sel{outline:2px solid var(--ac)}.sd .bad{color:var(--r)}
+.col{width:34px;height:34px;border-radius:50%;border:2px solid var(--bd);padding:0}
+table{width:100%;border-collapse:collapse;font-size:14px}td{padding:5px 4px;border-bottom:1px solid var(--bd)}
+.wrap{overflow-x:auto}
+.bar{height:8px;background:var(--bd);border-radius:6px;overflow:hidden}.bar i{display:block;height:100%;background:var(--ac)}
+.shop{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--bd)}
+</style></head><body><main>
+<h1>♟️ Jeux de société et de réflexion</h1>
+<div class="mu">Scores et profil enregistrés dans IndexedDB.</div>
+
+<div class="card" id="login"><h2>Joueur</h2>
+ <div class="row"><input id="name" placeholder="Votre pseudo" maxlength="20" style="flex:1"><button onclick="setPlayer()">OK</button></div></div>
+
+<div class="card" id="fl" hidden style="position:fixed;bottom:calc(12px + env(safe-area-inset-bottom,0px));left:12px;right:12px;max-width:496px;margin:auto;text-align:center;z-index:9"></div>
+<div id="app" hidden>
+ <div class="card" id="stat"></div>
+ <div class="row menu">
+  <button onclick="show('c4')">Puissance 4</button><button onclick="show('mm')">Mastermind</button>
+  <button onclick="show('g48')">2048</button><button onclick="show('sd')">Sudoku</button>
+  <button onclick="show('ttt')">Morpion</button><button onclick="show('mine')">Démineur</button><button onclick="show('simon')">Simon</button><button class="g" onclick="show('shop')">🛒 Boutique</button><button class="g" onclick="show('sc')">Scores</button>
+ </div>
+ <div class="card" id="view"></div>
+ <div class="mu">Joueur : <b id="who"></b> · <a href="#" onclick="logout();return false" style="color:var(--ac)">changer</a></div>
+</div>
+
+<script>
+let db=null,mem=[],player=null,P=null,HK={};
+const $=id=>document.getElementById(id),V=()=>$('view');
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const rnd=n=>Math.floor(Math.random()*n);
+function openDB(){return new Promise(res=>{try{
+ const r=indexedDB.open('arcade_reflexion',1);
+ r.onupgradeneeded=()=>{r.result.createObjectStore('players',{keyPath:'name'});r.result.createObjectStore('scores',{keyPath:'id',autoIncrement:true})};
+ r.onsuccess=()=>{db=r.result;res()};r.onerror=()=>res();
+}catch(e){res()}})}
+function dbOp(store,mode,fn){return new Promise(res=>{
+ try{const t=db.transaction(store,mode),q=fn(t.objectStore(store));t.oncomplete=()=>res(q&&q.result);t.onerror=()=>res(null)}catch(e){res(null)}})}
+function addScore(game,value,label){
+ const rec={game,value,label,name:player,date:Date.now()};
+ if(!db)mem.push(rec);else dbOp('scores','readwrite',s=>s.add(rec));
+ flash(reward(game,value));
+}
+const lvl=()=>Math.floor(P.xp/100)+1;
+function saveP(){P.last=Date.now();if(db)dbOp('players','readwrite',s=>s.put(P))}
+function stat(){$('stat').innerHTML=`<div class="row" style="justify-content:space-between"><b>Niveau ${lvl()}</b><span>🪙 ${P.coins} · 💡${P.inv.hint} ↩️${P.inv.undo} 🚀${P.inv.boost}</span></div><div class="bar" style="margin-top:6px"><i style="width:${P.xp%100}%"></i></div>`}
+let ft;function flash(m){const f=$('fl');f.textContent=m;f.hidden=false;clearTimeout(ft);ft=setTimeout(()=>f.hidden=true,4000)}
+function reward(game,v){
+ let xp,co;
+ if(game=='g48'){xp=Math.min(100,Math.round(v/40));co=Math.round(xp/2)}
+ else if(game=='ttt'){xp=v?30:5;co=v?20:2}
+ else if(game=='simon'){xp=Math.min(100,v*6);co=Math.round(xp/2)}
+ else{xp=game=='sd'?80:40;co=game=='sd'?50:25}
+ if(P.inv.boost>0){P.inv.boost--;xp*=2}
+ const l0=lvl();P.xp+=xp;P.coins+=co;let m=`+${xp} XP, +${co} 🪙`;
+ if(lvl()>l0){P.coins+=50;m+=` · Niveau ${lvl()} ! +50 🪙`}
+ saveP();stat();return m}
+function useItem(k){if(P.inv[k]>0){P.inv[k]--;saveP();stat();return true}flash('Plus de stock : passez par la Boutique 🛒');return false}
+const ITEMS=[['hint','💡 Indice','Aide dans Puissance 4, Mastermind, Sudoku et Démineur',30],['undo','↩️ Annuler','Annule le dernier coup (Puissance 4, 2048, Morpion)',25],['boost','🚀 Boost XP ×2','Double l’XP de la prochaine partie terminée',60],['theme','🎨 Thème Forêt','Accent vert, achat unique (activable/désactivable)',80]];
+function applyTheme(){document.documentElement.style.setProperty('--ac',P.on?'#2f9e44':'')}
+function shop(){V().innerHTML='<h2>🛒 Boutique</h2><div class="mu">Gagnez des pièces en finissant des parties ; chaque niveau gagné rapporte +50 🪙.</div>'+ITEMS.map(([k,n,d,c])=>{const th=k=='theme',own=th&&P.inv.theme;return `<div class="shop"><div><b>${n}</b> <span class="mu">${th?(own?(P.on?'(actif)':'(possédé)'):''):'(×'+P.inv[k]+')'}</span><div class="mu">${d}</div></div><button onclick="buy('${k}',${c})">${own?(P.on?'Désactiver':'Activer'):c+' 🪙'}</button></div>`}).join('')}
+function buy(k,c){if(k=='theme'&&P.inv.theme){P.on=!P.on;saveP();applyTheme();shop();return}if(P.coins<c){flash('Pas assez de pièces');return}P.coins-=c;P.inv[k]=(P.inv[k]||0)+1;if(k=='theme'){P.on=true;applyTheme()}saveP();stat();shop()}
+async function allScores(){return db?((await dbOp('scores','readonly',s=>s.getAll()))||[]):mem}
+
+async function setPlayer(){
+ const n=$('name').value.trim();if(!n)return;player=n;
+ const old=db?await dbOp('players','readonly',s=>s.get(n)):null;
+ P=Object.assign({name:n,xp:0,coins:50},old||{});P.inv=Object.assign({hint:old?0:1,undo:old?0:1,boost:0},P.inv||{});saveP();
+ try{localStorage.setItem('arcade_p',n)}catch(e){}
+ $('login').hidden=true;$('app').hidden=false;$('who').textContent=n;stat();applyTheme();show('c4');
+}
+function logout(){player=null;$('app').hidden=true;$('login').hidden=false}
+function show(g){window.removeEventListener('keydown',keyH);HK={};({c4,mm,g48,sd,ttt,mine,simon,sc,shop})[g]()}
+let keyH=()=>{};
+
+/* ---------- Puissance 4 ---------- */
+function c4(){
+ const R=6,C=7;let b=Array.from({length:R},()=>Array(C).fill(0)),over=false,mv=0,hist=[];
+ const win=(p)=>{for(let r=0;r<R;r++)for(let c=0;c<C;c++)for(const[dr,dc]of[[0,1],[1,0],[1,1],[1,-1]]){
+  let k=0;for(;k<4;k++){const x=r+dr*k,y=c+dc*k;if(x<0||x>=R||y<0||y>=C||b[x][y]!=p)break}if(k==4)return true}return false};
+ const drop=(c,p)=>{for(let r=R-1;r>=0;r--)if(!b[r][c]){b[r][c]=p;return r}return -1};
+ const undo=(c)=>{for(let r=0;r<R;r++)if(b[r][c]){b[r][c]=0;return}};
+ const can=c=>!b[0][c];
+ V().innerHTML='<h2>Puissance 4 (vous : 🔴)</h2><div class="mu" id="m">À vous</div><div class="grid c4" id="g"></div><p class="row"><button class="g" onclick="c4()">Rejouer</button><button class="g" onclick="HK.hint()">💡 Indice</button><button class="g" onclick="HK.undo()">↩️ Annuler</button></p>';
+ const draw=()=>{const g=$('g');g.innerHTML='';for(let r=0;r<R;r++)for(let c=0;c<C;c++){const x=document.createElement('button');x.className='cell'+(b[r][c]?' p'+b[r][c]:'');x.onclick=()=>play(c);g.appendChild(x)}};
+ const end=t=>{over=true;$('m').textContent=t};
+ const ai=()=>{const ok=[...Array(C).keys()].filter(can);
+  for(const p of[2,1])for(const c of ok){drop(c,p);const w=win(p);undo(c);if(w)return c}
+  const safe=ok.filter(c=>{drop(c,2);let bad=false;if(can(c)){drop(c,1);bad=win(1);undo(c)}undo(c);return !bad});
+  const pool=safe.length?safe:ok;pool.sort((a,b)=>Math.abs(a-3)-Math.abs(b-3)+(Math.random()-.5)*2);return pool[0]};
+ function play(c){
+  if(over||!can(c))return;hist.push([JSON.stringify(b),mv]);drop(c,1);mv++;draw();
+  if(win(1)){addScore('c4',mv,'Victoire en '+mv+' coups');return end('Vous gagnez 🎉')}
+  const a=ai();if(a===undefined)return end('Match nul');drop(a,2);draw();
+  if(win(2))return end('L’ordinateur gagne');
+ }
+ HK.hint=()=>{if(over||!useItem('hint'))return;const ok=[...Array(C).keys()].filter(can);let h=null;
+  for(const p of[1,2]){for(const c of ok){drop(c,p);const w=win(p);undo(c);if(w){h=c;break}}if(h!==null)break}
+  if(h===null)h=ok.sort((a,b)=>Math.abs(a-3)-Math.abs(b-3))[0];$('m').textContent='💡 Essayez la colonne '+(h+1)};
+ HK.undo=()=>{if(over||!hist.length||!useItem('undo'))return;const[st,m]=hist.pop();b=JSON.parse(st);mv=m;draw();$('m').textContent='À vous'};
+ draw();
+}
+
+/* ---------- Mastermind ---------- */
+function mm(){
+ const COL=['#e03131','#2f9e44','#1971c2','#f2b705','#9c36b5','#f76707'];
+ const code=Array.from({length:4},()=>rnd(6));let cur=[],tries=0,over=false;
+ V().innerHTML='<h2>Mastermind</h2><div class="mu">Devinez le code de 4 couleurs (10 essais). ● bien placé, ○ mal placé.</div><div id="h"></div><div class="row" id="cur" style="margin:8px 0;min-height:36px"></div><div class="row" id="pal"></div><p class="row"><button onclick="">Valider</button><button class="g">Effacer</button><button class="g" onclick="mm()">Rejouer</button><button class="g" onclick="HK.hint()">💡 Indice</button></p><div class="mu" id="m"></div>';
+ const [ok,clr]=V().querySelectorAll('p button');
+ HK.hint=()=>{if(over||!useItem('hint'))return;const i=rnd(4);$('m').innerHTML='💡 Position '+(i+1)+' : '+dot(code[i])};
+ const dot=c=>`<span class="col" style="display:inline-block;width:26px;height:26px;background:${COL[c]}"></span>`;
+ COL.forEach((c,i)=>{const b=document.createElement('button');b.className='col';b.style.background=c;b.onclick=()=>{if(over||cur.length>=4)return;cur.push(i);r()};$('pal').appendChild(b)});
+ const r=()=>$('cur').innerHTML=cur.map(dot).join('');
+ clr.onclick=()=>{cur=[];r()};
+ ok.onclick=()=>{
+  if(over||cur.length<4)return;tries++;
+  let bl=0,wh=0;const cc=[...code],gg=[...cur];
+  for(let i=0;i<4;i++)if(gg[i]==cc[i]){bl++;gg[i]=cc[i]=-1}
+  for(let i=0;i<4;i++)if(gg[i]>=0){const k=cc.indexOf(gg[i]);if(k>=0){wh++;cc[k]=-1}}
+  $('h').insertAdjacentHTML('beforeend',`<div class="row" style="margin:3px 0">${cur.map(dot).join('')} <b>${'●'.repeat(bl)}${'○'.repeat(wh)}</b></div>`);
+  cur=[];r();
+  if(bl==4){over=true;addScore('mm',tries,tries+' essais');$('m').textContent='Trouvé en '+tries+' essais 🎉'}
+  else if(tries>=10){over=true;$('m').innerHTML='Perdu ! Code : '+code.map(dot).join('')}
+ };
+}
+
+/* ---------- 2048 ---------- */
+function g48(){
+ let g=Array.from({length:4},()=>Array(4).fill(0)),score=0,over=false,prev=null;
+ const add=()=>{const e=[];g.forEach((r,i)=>r.forEach((v,j)=>{if(!v)e.push([i,j])}));if(e.length){const[i,j]=e[rnd(e.length)];g[i][j]=Math.random()<.9?2:4}};
+ const slide=row=>{let a=row.filter(Boolean),o=[];for(let i=0;i<a.length;i++){if(a[i]==a[i+1]){o.push(a[i]*2);score+=a[i]*2;i++}else o.push(a[i])}while(o.length<4)o.push(0);return o};
+ const rot=m=>m[0].map((_,i)=>m.map(r=>r[i]).reverse());
+ function move(d){ // 0 left,1 up,2 right,3 down
+  if(over)return;const before=JSON.stringify(g),s0=score;
+  let m=g;for(let i=0;i<d;i++)m=rot(m);
+  m=m.map(slide);for(let i=0;i<(4-d)%4;i++)m=rot(m);g=m;
+  if(JSON.stringify(g)==before)return;prev=[before,s0];add();draw();
+  const can=g.some((r,i)=>r.some((v,j)=>!v||(g[i][j+1]==v)||(g[i+1]&&g[i+1][j]==v)));
+  if(!can){over=true;addScore('g48',score,score+' pts');$('m').textContent='Fin de partie : '+score+' pts'}
+ }
+ V().innerHTML='<h2>2048</h2><div class="mu" id="m"></div><div class="grid g48" id="g"></div><p class="mu">Flèches du clavier ou glissez le doigt.</p><p class="row"><button class="g" onclick="g48()">Rejouer</button><button class="g" onclick="HK.undo()">↩️ Annuler</button></p>';
+ const col={2:'#eee4da',4:'#ede0c8',8:'#f2b179',16:'#f59563',32:'#f67c5f',64:'#f65e3b',128:'#edcf72'};
+ function draw(){$('m').textContent='Score : '+score;$('g').innerHTML=g.flat().map(v=>`<div class="cell" style="background:${v?(col[v]||'#edc22e'):'var(--bg)'};color:${v?'#333':'inherit'}">${v||''}</div>`).join('')}
+ add();add();draw();
+ HK.undo=()=>{if(over||!prev||!useItem('undo'))return;g=JSON.parse(prev[0]);score=prev[1];prev=null;draw()};
+ keyH=e=>{const k={ArrowLeft:0,ArrowUp:1,ArrowRight:2,ArrowDown:3}[e.key];if(k!==undefined){e.preventDefault();move(k)}};
+ window.addEventListener('keydown',keyH);
+ let sx,sy;const el=$('g');
+ el.addEventListener('touchstart',e=>{sx=e.touches[0].clientX;sy=e.touches[0].clientY},{passive:true});
+ el.addEventListener('touchend',e=>{const dx=e.changedTouches[0].clientX-sx,dy=e.changedTouches[0].clientY-sy;
+  if(Math.max(Math.abs(dx),Math.abs(dy))<20)return;
+  move(Math.abs(dx)>Math.abs(dy)?(dx<0?0:2):(dy<0?1:3))});
+}
+
+/* ---------- Sudoku ---------- */
+function sd(){
+ const base=(r,c)=>(r*3+Math.floor(r/3)+c)%9;
+ const sh=a=>a.sort(()=>Math.random()-.5);
+ const g3=sh([0,1,2]),rows=[].concat(...g3.map(g=>sh([0,1,2]).map(r=>g*3+r))),cols=[].concat(...sh([0,1,2]).map(g=>sh([0,1,2]).map(c=>g*3+c)));
+ const dg=sh([1,2,3,4,5,6,7,8,9]);
+ const sol=rows.map(r=>cols.map(c=>dg[base(r,c)]));
+ const fixed=sol.map(r=>r.map(()=>true));
+ let removed=0;while(removed<42){const r=rnd(9),c=rnd(9);if(fixed[r][c]){fixed[r][c]=false;removed++}}
+ const g=sol.map((r,i)=>r.map((v,j)=>fixed[i][j]?v:0));let sel=null,t0=Date.now();
+ V().innerHTML='<h2>Sudoku</h2><div class="mu" id="m">Touchez une case puis un chiffre.</div><div class="grid sd" id="g"></div><div class="row" id="np" style="margin:8px 0"></div><p class="row"><button id="ck">Vérifier</button><button class="g" onclick="sd()">Nouvelle grille</button><button class="g" onclick="HK.hint()">💡 Indice</button></p>';
+ const draw=()=>{$('g').innerHTML='';g.forEach((r,i)=>r.forEach((v,j)=>{const b=document.createElement('button');
+  b.className='cell'+(fixed[i][j]?' fx':'')+(sel&&sel[0]==i&&sel[1]==j?' sel':'');b.textContent=v||'';
+  if(i%3==2&&i<8)b.style.marginBottom='4px';if(j%3==2&&j<8)b.style.marginRight='4px';
+  b.onclick=()=>{if(!fixed[i][j]){sel=[i,j];draw()}};$('g').appendChild(b)}))};
+ for(let n=1;n<=9;n++){const b=document.createElement('button');b.className='g';b.textContent=n;b.onclick=()=>{if(sel){g[sel[0]][sel[1]]=n;draw()}};$('np').appendChild(b)}
+ const e=document.createElement('button');e.className='g';e.textContent='⌫';e.onclick=()=>{if(sel){g[sel[0]][sel[1]]=0;draw()}};$('np').appendChild(e);
+ $('ck').onclick=()=>{
+  const ok=(a)=>new Set(a).size==9&&!a.includes(0);let good=true;
+  for(let i=0;i<9;i++){if(!ok(g[i])||!ok(g.map(r=>r[i])))good=false;
+   const br=Math.floor(i/3)*3,bc=(i%3)*3;if(!ok([].concat(...[0,1,2].map(k=>g[br+k].slice(bc,bc+3)))))good=false}
+  if(good){const s=Math.round((Date.now()-t0)/1000);addScore('sd',s,Math.floor(s/60)+' min '+s%60+' s');$('m').textContent='Bravo ! Résolu en '+Math.floor(s/60)+' min '+s%60+' s 🎉'}
+  else $('m').textContent='Pas encore correct (grille incomplète ou erreurs).';
+ };
+ HK.hint=()=>{const c=[];g.forEach((r,i)=>r.forEach((v,j)=>{if(!fixed[i][j]&&v!=sol[i][j])c.push([i,j])}));if(!c.length||!useItem('hint'))return;const[i,j]=c[rnd(c.length)];g[i][j]=sol[i][j];fixed[i][j]=true;draw()};
+ draw();
+}
+
+/* ---------- Morpion ---------- */
+function ttt(){
+ let b=Array(9).fill(''),over=false,h=[];
+ const L=[[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]],win=p=>L.some(l=>l.every(i=>b[i]==p));
+ V().innerHTML='<h2>Morpion (vous : ✕)</h2><div class="mu" id="m">À vous</div><div class="grid t3" id="g"></div><p class="row"><button class="g" onclick="ttt()">Rejouer</button><button class="g" onclick="HK.undo()">↩️ Annuler</button></p>';
+ const draw=()=>{$('g').innerHTML='';b.forEach((c,i)=>{const x=document.createElement('button');x.className='cell';x.textContent=c;x.onclick=()=>play(i);$('g').appendChild(x)})};
+ const end=r=>{over=true;$('m').textContent={W:'Vous gagnez 🎉',L:'L’ordinateur gagne',D:'Match nul'}[r];addScore('ttt',r=='W'?1:0,{W:'Victoire',L:'Défaite',D:'Nul'}[r])};
+ function play(i){if(over||b[i])return;h.push(b.slice());b[i]='✕';draw();if(win('✕'))return end('W');if(!b.includes(''))return end('D');
+  const f=b.map((c,k)=>c?-1:k).filter(k=>k>=0),tw=p=>f.find(k=>{b[k]=p;const w=win(p);b[k]='';return w});
+  let m=tw('◯');if(m===undefined)m=tw('✕');if(m===undefined)m=b[4]?f[rnd(f.length)]:4;
+  b[m]='◯';draw();if(win('◯'))return end('L');if(!b.includes(''))end('D')}
+ HK.undo=()=>{if(over||!h.length||!useItem('undo'))return;b=h.pop();draw()};
+ draw();
+}
+
+/* ---------- Démineur ---------- */
+function mine(){
+ const N=9,M=10;let mines=null,rev=Array.from({length:N},()=>Array(N).fill(false)),fl=rev.map(x=>x.slice()),over=false,flag=false,t0=0,left=N*N-M;
+ V().innerHTML='<h2>Démineur</h2><div class="mu" id="m">10 mines</div><div class="grid" id="g" style="grid-template-columns:repeat(9,1fr);gap:3px"></div><p class="row"><button class="g" onclick="mine()">Rejouer</button><button class="g" id="fb">Mode : creuser</button><button class="g" onclick="HK.hint()">💡 Indice</button></p>';
+ $('fb').onclick=()=>{flag=!flag;$('fb').textContent=flag?'Mode : 🚩 drapeau':'Mode : creuser'};
+ const nb=(i,j)=>{const o=[];for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){const x=i+a,y=j+b;if((a||b)&&x>=0&&y>=0&&x<N&&y<N)o.push([x,y])}return o};
+ const cnt=(i,j)=>nb(i,j).filter(([x,y])=>mines[x][y]).length;
+ const place=(si,sj)=>{mines=Array.from({length:N},()=>Array(N).fill(false));let k=0;while(k<M){const i=rnd(N),j=rnd(N);if(!mines[i][j]&&!(Math.abs(i-si)<=1&&Math.abs(j-sj)<=1)){mines[i][j]=true;k++}}t0=Date.now()};
+ const draw=()=>{const g=$('g');g.innerHTML='';for(let i=0;i<N;i++)for(let j=0;j<N;j++){const b=document.createElement('button');b.className='cell';b.style.fontSize='16px';
+  if(rev[i][j]){b.style.background='var(--card)';b.textContent=mines[i][j]?'💣':(cnt(i,j)||'')}else if(fl[i][j])b.textContent='🚩';
+  b.onclick=()=>tap(i,j);g.appendChild(b)}};
+ const dig=(i,j)=>{const st=[[i,j]];while(st.length){const[x,y]=st.pop();if(rev[x][y]||fl[x][y])continue;rev[x][y]=true;left--;if(!cnt(x,y))nb(x,y).forEach(q=>st.push(q))}};
+ const fin=()=>{if(left==0){over=true;const s=Math.round((Date.now()-t0)/1000);addScore('mine',s,s+' s');$('m').textContent='Gagné en '+s+' s 🎉'}};
+ function tap(i,j){if(over)return;
+  if(flag){if(!rev[i][j])fl[i][j]=!fl[i][j];draw();return}
+  if(fl[i][j]||rev[i][j])return;if(!m
